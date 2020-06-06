@@ -5,10 +5,10 @@ import {
   InMemoryCache,
   ApolloProvider,
   useMutation,
-  ApolloLink,
-  HttpLink, from, fromPromise
+  from,
 } from '@apollo/client';
-import {onError} from '@apollo/link-error';
+import { WebSocketLink } from "@apollo/link-ws";
+import { SubscriptionClient } from "subscriptions-transport-ws";
 
 import {
   DiscoveryDocument,
@@ -30,89 +30,64 @@ import {
   KEYCLOAK_DISCOVERY_URL,
   KEYCLOAK_DISCOVERY_DOMAIN,
   NATIVE_REDIRECT_URI,
-  EXPIRED_TOKEN,
+  EXPIRED_TOKEN, HASURA_WS_URL,
 } from './constants'; // this one is not in version control
 import jwtDecode from 'jwt-decode';
-import {Observable} from "@apollo/client/utilities/observables/Observable";
 
-let accessToken = '';
-let refreshToken = '';
+let accessToken: string | null = EXPIRED_TOKEN;
+let refreshToken: string | null = '';
 let discoveryDocument: DiscoveryDocument | null = null;
 
-const httpLink = new HttpLink({
-  uri: HASURA_URL,
+async function getTokens(): Promise<void> {
+  try {
+    const resp = await fetch(discoveryDocument?.tokenEndpoint || 'http://localhost', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formUrlEncode({
+        /* eslint-disable @typescript-eslint/camelcase */
+        client_id: CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const authCodeResponse = (await resp.json()) as AuthCodeResponse;
+    accessToken = authCodeResponse.access_token;
+    refreshToken = authCodeResponse.refresh_token;
+  } catch (e) {
+    console.log(e);
+  }
+}
+
+const subscriptionClient = new SubscriptionClient(HASURA_WS_URL, {
+  reconnect: true,
+  lazy: true,
+  timeout: 8000,
+  connectionParams: async () => {
+    await getTokens();
+    return {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'x-hasura-role': 'admin',
+      }
+    };
+  },
 });
 
-const authMiddleware = new ApolloLink((operation, forward) => {
-  // add the authorization to the headers
-  operation.setContext({
-    headers: {
-      authorization: accessToken ? `Bearer ${EXPIRED_TOKEN}` : '',
-      'x-hasura-role': 'admin',
-    }
-  });
-  return forward(operation);
+// on subscription error, refresh subscription (close and reconnect)
+subscriptionClient.onError(()=> {
+  console.log('onError');
+  subscriptionClient.close(false, false);
 })
 
-const errorMiddleware = onError((
-  {
-    graphQLErrors,
-    networkError,
-    operation,
-    forward
-  }) => {
-  // this could indicate a graphQL or JWT error, in that case 'graphQLErrors' array property is set
-  // or an HTTP error, in this case networkError is set, with a statusCode and message
-  // otherwise this function will not be called at all.
-  if (graphQLErrors) {
-    for (let err of graphQLErrors) {
-      switch (err?.extensions?.code) {
-        case 'invalid-jwt':
-          return new Observable(observer => {
-            fetch(discoveryDocument?.tokenEndpoint || 'http://localhost', {
-              method: 'POST',
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: formUrlEncode({
-                /* eslint-disable @typescript-eslint/camelcase */
-                client_id: CLIENT_ID,
-                refresh_token: refreshToken,
-                grant_type: 'refresh_token',
-              }),
-            }).then((resp) => resp.json())
-              .then((refreshResponse) => {
-                let headers = {
-                  ...operation.getContext().headers,
-                  //switch out old access token for new one
-                  authorization: `Bearer ${refreshResponse.access_token}`,
-                };
-                operation.setContext({
-                  headers,
-                });
-
-              }).then(() => {
-              const subscriber = {
-                next: observer.next.bind(observer),
-                error: observer.error.bind(observer),
-                complete: observer.complete.bind(observer)
-              };
-              // Retry last failed request
-              forward(operation).subscribe(subscriber);
-            })
-              .catch(function (error) {
-                observer.error(error);
-              });
-          });
-      }
-    }
-  }
-  console.log('errorMiddleware ends');
-})
+const wsLink = new WebSocketLink(
+  subscriptionClient
+);
 
 const client = new ApolloClient({
-  link: from([authMiddleware, errorMiddleware, httpLink]),
+  link: from([wsLink]),
   cache: new InMemoryCache(),
 });
 
