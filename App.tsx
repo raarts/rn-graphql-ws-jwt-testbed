@@ -1,15 +1,14 @@
 import React, {useState} from 'react';
 import {Alert, Button, Platform, StyleSheet, Text, View} from 'react-native';
-import {ApolloClient, HttpLink, InMemoryCache, gql, ApolloProvider, useMutation, useQuery} from '@apollo/client';
+import {ApolloClient, HttpLink, InMemoryCache, ApolloProvider, useMutation } from '@apollo/client';
 import {
-  AuthSessionResult,
-  DiscoveryDocument,
   makeRedirectUri,
   useAuthRequest,
   useAutoDiscovery
 } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import {
+  GET_OR_CREATE_PERSON,
   AuthCodeResponse,
   AccessToken,
   formUrlEncode
@@ -19,6 +18,7 @@ import {
   X_HASURA_ADMIN_SECRET,
   HASURA_URL,
   KEYCLOAK_DISCOVERY_URL,
+  KEYCLOAK_DISCOVERY_DOMAIN,
   NATIVE_REDIRECT_URI,
 } from './constants'; // this one is not in version control
 import jwtDecode from 'jwt-decode';
@@ -72,7 +72,7 @@ function UserInfo() {
         }
         if (response.type === 'success') {
           try {
-            const resp = await fetch(discovery?.tokenEndpoint + 'g' || 'http://localhost', {
+            const resp = await fetch(discovery?.tokenEndpoint || 'http://localhost', {
               method: 'POST',
               headers: {
                 Accept: 'application/json',
@@ -92,11 +92,12 @@ function UserInfo() {
             const authCodeResponse = (await resp.json()) as AuthCodeResponse;
             setAuthCodeResponse(authCodeResponse);
           } catch (e) {
+            const msg = `Could not get your information from ${KEYCLOAK_DISCOVERY_DOMAIN}.\nError text: ${e || 'something went wrong, that\'s all we know'}`;
             if (Platform.OS === 'web') {
               // eslint-disable-next-line no-alert
-              alert(`Authentication error: ${e || 'something went wrong'}`);
+              alert(msg);
             } else {
-              Alert.alert('Authentication error', e || 'something went wrong');
+              Alert.alert('Authentication error', msg);
             }
           }
         }
