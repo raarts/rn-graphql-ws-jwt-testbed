@@ -1,6 +1,14 @@
 import React, {useState} from 'react';
 import {Alert, Button, Platform, StyleSheet, Text, View} from 'react-native';
-import {ApolloClient, HttpLink, InMemoryCache, ApolloProvider, useMutation } from '@apollo/client';
+import {
+  ApolloClient,
+  InMemoryCache,
+  ApolloProvider,
+  useMutation,
+  ApolloLink,
+  HttpLink, concat
+} from '@apollo/client';
+
 import {
   makeRedirectUri,
   useAuthRequest,
@@ -23,15 +31,26 @@ import {
 } from './constants'; // this one is not in version control
 import jwtDecode from 'jwt-decode';
 
-const client = new ApolloClient({
-  cache: new InMemoryCache(),
-  link: new HttpLink({
-    uri: HASURA_URL,
+let accessToken = '';
+
+const httpLink = new HttpLink({
+  uri: HASURA_URL,
+});
+
+const authMiddleware = new ApolloLink((operation, forward) => {
+  // add the authorization to the headers
+  operation.setContext({
     headers: {
-      'x-hasura-admin-secret': X_HASURA_ADMIN_SECRET,
-      'x-hasura-user': 'admin',
+      authorization: accessToken ? `Bearer ${accessToken}` : '',
+      'x-hasura-role': 'admin',
     }
-  })
+  });
+  return forward(operation);
+})
+
+const client = new ApolloClient({
+  link: concat(authMiddleware, httpLink),
+  cache: new InMemoryCache(),
 });
 
 WebBrowser.maybeCompleteAuthSession();
@@ -91,6 +110,8 @@ function UserInfo() {
             });
             const authCodeResponse = (await resp.json()) as AuthCodeResponse;
             setAuthCodeResponse(authCodeResponse);
+            accessToken = authCodeResponse.access_token || 'none';
+            console.log('accessToken=', accessToken);
           } catch (e) {
             const msg = `Could not get your information from ${KEYCLOAK_DISCOVERY_DOMAIN}.\nError text: ${e || 'something went wrong, that\'s all we know'}`;
             if (Platform.OS === 'web') {
@@ -147,8 +168,8 @@ function UserInfo() {
     return <Text>Loading...</Text>;
   }
   if (error) {
-    console.log('error:', error);
-    return <Text>Error :(</Text>;
+    console.log('error:', error); // should probably throw
+    return <Text>[`Error : ${error.message}`]</Text>;
   }
 
   console.log('rendering..');
@@ -160,7 +181,7 @@ function UserInfo() {
       <View style={{padding: 10}}>
         <Button title='Login' onPress={() => {
           console.log('button pressed');
-          promptAsync();
+          promptAsync().then();
         }}/>
       </View>
       <View style={{padding: 10}}>
