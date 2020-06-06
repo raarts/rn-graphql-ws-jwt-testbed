@@ -6,8 +6,9 @@ import {
   ApolloProvider,
   useMutation,
   ApolloLink,
-  HttpLink, concat
+  HttpLink, from
 } from '@apollo/client';
+import {onError} from '@apollo/link-error';
 
 import {
   makeRedirectUri,
@@ -28,6 +29,7 @@ import {
   KEYCLOAK_DISCOVERY_URL,
   KEYCLOAK_DISCOVERY_DOMAIN,
   NATIVE_REDIRECT_URI,
+  EXPIRED_TOKEN,
 } from './constants'; // this one is not in version control
 import jwtDecode from 'jwt-decode';
 
@@ -48,8 +50,15 @@ const authMiddleware = new ApolloLink((operation, forward) => {
   return forward(operation);
 })
 
+const errorMiddleware = onError((error) => {
+  // this could indicate a graphQL or JWT error, in that case 'graphQLErrors' array property is set
+  // or an HTTP error, in this case networkError is set, with a statusCode and message
+  // otherwise this function will not be called at all.
+  console.log('error=', error);
+})
+
 const client = new ApolloClient({
-  link: concat(authMiddleware, httpLink),
+  link: from([authMiddleware, errorMiddleware, httpLink]),
   cache: new InMemoryCache(),
 });
 
