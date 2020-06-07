@@ -38,7 +38,7 @@ let accessToken: string | null = EXPIRED_TOKEN;
 let refreshToken: string | null = '';
 let discoveryDocument: DiscoveryDocument | null = null;
 
-async function getTokens(): Promise<void> {
+async function getTokens(): Promise<string | undefined> {
   try {
     const resp = await fetch(discoveryDocument?.tokenEndpoint || 'http://localhost', {
       method: 'POST',
@@ -56,6 +56,7 @@ async function getTokens(): Promise<void> {
     const authCodeResponse = (await resp.json()) as AuthCodeResponse;
     accessToken = authCodeResponse.access_token;
     refreshToken = authCodeResponse.refresh_token;
+    return authCodeResponse.access_token || '';
   } catch (e) {
     console.log(e);
   }
@@ -67,10 +68,10 @@ const subscriptionClient = new SubscriptionClient(HASURA_WS_URL, {
   lazy: true,
   timeout: 8000,
   connectionParams: async () => {
-    await getTokens();
+    const accToken = await getTokens();
     return {
       headers: {
-        authorization: `Bearer ${accessToken}`,
+        authorization: `Bearer ${accToken}`,
         'x-hasura-role': 'admin',
       }
     };
