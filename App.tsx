@@ -7,8 +7,8 @@ import {
   useMutation,
   from,
 } from '@apollo/client';
-import { WebSocketLink } from "@apollo/link-ws";
-import { SubscriptionClient } from "subscriptions-transport-ws";
+import {WebSocketLink} from "@apollo/link-ws";
+import {SubscriptionClient} from "subscriptions-transport-ws";
 
 import {
   DiscoveryDocument,
@@ -63,6 +63,7 @@ async function getTokens(): Promise<void> {
 
 const subscriptionClient = new SubscriptionClient(HASURA_WS_URL, {
   reconnect: true,
+  reconnectionAttempts: 5,
   lazy: true,
   timeout: 8000,
   connectionParams: async () => {
@@ -74,13 +75,36 @@ const subscriptionClient = new SubscriptionClient(HASURA_WS_URL, {
       }
     };
   },
+  inactivityTimeout: 10000,
+  connectionCallback: (error: Error[]) => {
+    if (error) {
+      console.log('connectionCallback:', error);
+    }
+    console.log('connectionCallback');
+  },
 });
 
 // on subscription error, refresh subscription (close and reconnect)
-subscriptionClient.onError(()=> {
-  console.log('onError');
+subscriptionClient.onError((error) => {
+  console.log('subscriptionClient.onError:', error);
   subscriptionClient.close(false, false);
 })
+
+subscriptionClient.onConnected(() => {
+  console.log('Connected');
+});
+
+subscriptionClient.onDisconnected(() => {
+  console.log('Disconnected');
+});
+
+subscriptionClient.onReconnected(() => {
+  console.log('Reconnected');
+});
+
+subscriptionClient.onReconnecting(() => {
+  console.log('Reconnecting');
+});
 
 const wsLink = new WebSocketLink(
   subscriptionClient
@@ -169,18 +193,25 @@ function UserInfo() {
     getCred().then();
   }, [response]);
 
-  React.useEffect(() => {
+  const getOrCreate = async () => {
     if (AuthcodeResponse) {
-      console.log('useEffect called on AuthcodeResponse:', AuthcodeResponse);
       const accessToken = jwtDecode(AuthcodeResponse.access_token || '') as AccessToken;
-      getOrCreatePerson({
+      return getOrCreatePerson({
         variables: {
           external_id: accessToken.sub,
           given_name: accessToken.given_name,
           family_name: accessToken.family_name,
           email: accessToken.email,
         },
-      }).then();
+      })
+    }
+  };
+
+  React.useEffect(() => {
+    if (AuthcodeResponse) {
+      console.log('useEffect called on AuthcodeResponse:', AuthcodeResponse);
+      const accessToken = jwtDecode(AuthcodeResponse.access_token || '') as AccessToken;
+      getOrCreate().then();
     } else {
       console.log('useEffect called but AuthcodeResponse is null');
     }
@@ -209,7 +240,15 @@ function UserInfo() {
   }
   if (error) {
     console.log('error:', error); // should probably throw
-    return <Text>[`Error : ${error.message}`]</Text>;
+    return (
+      <View>
+        <Text>{`Error: ${error.message}`}</Text>
+        <Button title='Try Again' onPress={() => {
+          console.log('button pressed');
+          getOrCreate().then();
+        }}/>
+      </View>
+    );
   }
 
   console.log('rendering..');
