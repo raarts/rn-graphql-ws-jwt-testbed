@@ -1,14 +1,9 @@
 import React, {useState} from 'react';
 import {Alert, Button, Platform, StyleSheet, Text, View} from 'react-native';
 import {
-  ApolloClient,
-  InMemoryCache,
   ApolloProvider,
   useMutation,
-  from,
 } from '@apollo/client';
-import {WebSocketLink} from "@apollo/link-ws";
-import {SubscriptionClient} from "subscriptions-transport-ws";
 
 import {
   DiscoveryDocument,
@@ -25,14 +20,13 @@ import {
 } from './extra';
 import {
   CLIENT_ID,
-  X_HASURA_ADMIN_SECRET,
-  HASURA_URL,
   KEYCLOAK_DISCOVERY_URL,
   KEYCLOAK_DISCOVERY_DOMAIN,
   NATIVE_REDIRECT_URI,
-  EXPIRED_TOKEN, HASURA_WS_URL,
+  EXPIRED_TOKEN,
 } from './constants'; // this one is not in version control
 import jwtDecode from 'jwt-decode';
+import {createWebsocketClient} from "./graphql";
 
 let accessToken: string | null = EXPIRED_TOKEN;
 let refreshToken: string | null = '';
@@ -62,59 +56,7 @@ async function getTokens(): Promise<string | undefined> {
   }
 }
 
-const subscriptionClient = new SubscriptionClient(HASURA_WS_URL, {
-  reconnect: true,
-  reconnectionAttempts: 5,
-  lazy: true,
-  timeout: 8000,
-  connectionParams: async () => {
-    const accToken = await getTokens();
-    return {
-      headers: {
-        authorization: `Bearer ${accToken}`,
-        'x-hasura-role': 'admin',
-      }
-    };
-  },
-  inactivityTimeout: 10000,
-  connectionCallback: (error: Error[]) => {
-    if (error) {
-      console.log('connectionCallback:', error);
-    }
-    console.log('connectionCallback');
-  },
-});
-
-// on subscription error, refresh subscription (close and reconnect)
-subscriptionClient.onError((error) => {
-  console.log('subscriptionClient.onError:', error);
-  subscriptionClient.close(false, false);
-})
-
-subscriptionClient.onConnected(() => {
-  console.log('Connected');
-});
-
-subscriptionClient.onDisconnected(() => {
-  console.log('Disconnected');
-});
-
-subscriptionClient.onReconnected(() => {
-  console.log('Reconnected');
-});
-
-subscriptionClient.onReconnecting(() => {
-  console.log('Reconnecting');
-});
-
-const wsLink = new WebSocketLink(
-  subscriptionClient
-);
-
-const client = new ApolloClient({
-  link: from([wsLink]),
-  cache: new InMemoryCache(),
-});
+const client = createWebsocketClient(getTokens);
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -211,7 +153,7 @@ function UserInfo() {
   React.useEffect(() => {
     if (AuthcodeResponse) {
       console.log('useEffect called on AuthcodeResponse:', AuthcodeResponse);
-      const accessToken = jwtDecode(AuthcodeResponse.access_token || '') as AccessToken;
+      // const accessToken = jwtDecode(AuthcodeResponse.access_token || '') as AccessToken;
       getOrCreate().then();
     } else {
       console.log('useEffect called but AuthcodeResponse is null');
